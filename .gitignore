@@ -23,3 +23,5 @@ Thumbs.db
 
 # lambda download zip fiel
 *.zip
+
+.DS_Store
