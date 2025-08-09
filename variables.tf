@@ -22,10 +22,15 @@ variable "prefix" {
 #   type        = string
 # }
 
-variable "existing_s3_bucket_name" {
-  description = "Name of the existing S3 bucket that stores logs to be collected"
+variable "s3_bucket_prefix" {
+  description = "Prefix for S3 bucket name that will store logs"
   type        = string
 }
+
+# variable "existing_s3_bucket_name" {
+#   description = "Name of the existing S3 bucket that stores logs to be collected"
+#   type        = string
+# }
 
 variable "sqs_queue_name" {
   description = "Name of the SQS queue that will receive S3 notifications"

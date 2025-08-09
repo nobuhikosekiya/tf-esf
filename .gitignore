@@ -21,7 +21,12 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# lambda download zip fiel
+# lambda download zip file
 *.zip
 
-.DS_Store
+# GitHub Actions
+.github/workflows/*.yml.bak
+
+# Test outputs
+test-*.log
+test_results/

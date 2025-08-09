@@ -1,10 +1,24 @@
 locals {
   config_bucket_name  = "${var.prefix}-esf-config"
+  logs_bucket_name    = "${var.s3_bucket_prefix}-${random_string.bucket_suffix.result}"
   dependencies_url    = "http://esf-dependencies.s3.amazonaws.com"
   dependencies_file   = "${var.esf_release_version}.zip"
   lambda_name         = "${var.prefix}-esf-lambda"
   sqs_queue_arn       = aws_sqs_queue.s3_notifications.arn
-  existing_bucket_arn = "arn:aws:s3:::${var.existing_s3_bucket_name}"
+  logs_bucket_arn     = aws_s3_bucket.logs_bucket.arn
+}
+
+# Random string for unique bucket naming
+resource "random_string" "bucket_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+# Create an S3 bucket for logs
+resource "aws_s3_bucket" "logs_bucket" {
+  bucket        = local.logs_bucket_name
+  force_destroy = true
 }
 
 # Create an S3 bucket for ESF configuration
@@ -37,7 +51,7 @@ resource "aws_sqs_queue_policy" "s3_notifications" {
         Resource = aws_sqs_queue.s3_notifications.arn
         Condition = {
           ArnEquals = {
-            "aws:SourceArn" = local.existing_bucket_arn
+            "aws:SourceArn" = local.logs_bucket_arn
           }
         }
       }
@@ -47,7 +61,7 @@ resource "aws_sqs_queue_policy" "s3_notifications" {
 
 # Configure S3 bucket to send notifications to SQS
 resource "aws_s3_bucket_notification" "bucket_notification" {
-  bucket = var.existing_s3_bucket_name
+  bucket = aws_s3_bucket.logs_bucket.id
 
   queue {
     queue_arn = aws_sqs_queue.s3_notifications.arn
@@ -56,8 +70,6 @@ resource "aws_s3_bucket_notification" "bucket_notification" {
 
   depends_on = [aws_sqs_queue_policy.s3_notifications]
 }
-
-# EC2 instance and related resources have been removed
 
 # ESF Lambda Configuration
 
@@ -205,7 +217,7 @@ resource "aws_iam_policy" "esf_lambda" {
         Resource = [
           "${aws_s3_bucket.esf_config.arn}/config.yaml",
           "${aws_s3_bucket.esf_config.arn}/${local.dependencies_file}",
-          "${local.existing_bucket_arn}/*"
+          "${local.logs_bucket_arn}/*"
         ]
       },
       {
@@ -214,7 +226,7 @@ resource "aws_iam_policy" "esf_lambda" {
           "s3:ListBucket"
         ]
         Resource = [
-          local.existing_bucket_arn
+          local.logs_bucket_arn
         ]
       },
       {
