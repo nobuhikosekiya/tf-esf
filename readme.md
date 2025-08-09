@@ -1,35 +1,75 @@
 # S3 to Elasticsearch with Elastic Serverless Forwarder
 
-This Terraform project sets up the necessary AWS infrastructure to collect logs from an S3 bucket using SQS notifications and forwards them to Elasticsearch using the Elastic Serverless Forwarder (ESF).
+This Terraform project sets up AWS infrastructure to collect logs from an S3 bucket using SQS notifications and forwards them to Elasticsearch using the Elastic Serverless Forwarder (ESF).
 
 ## Architecture
 
 ```
 ┌─────────────┐    Notification     ┌───────────┐    EventSource    ┌───────────────────┐
-│  Existing   │──────────────────▶  │           │◀─────────────────┤                   │
-│  S3 Bucket  │                     │  SQS Queue│                  │  Elastic Serverless│
+│  New S3     │──────────────────▶  │           │◀─────────────────┤                   │
+│  Bucket     │                     │  SQS Queue│                  │  Elastic Serverless│
 │  (Logs)     │                     │           │                  │  Forwarder (Lambda)│
 └─────────────┘                     └───────────┘                  └───────────────────┘
       │                                                                      │
-      │                                                                      │
       │                 S3 Object Access                                     │
-      └─────────────────────────────────────────────────────────────────────┘
-                                                                             │
-                                                                             │
-                                                                             ▼
-                                                             ┌─────────────────────────┐
-                                                             │                         │
-                                                             │     Elasticsearch       │
-                                                             │                         │
-                                                             └─────────────────────────┘
+      │   ┌─────────────────────────────────────────────────────────────────┘
+      │   │                                                                  │
+      ▼   ▼                                                                  ▼
+┌─────────────────────────┐                                 ┌─────────────────────────┐
+│   S3 Bucket Structure   │                                 │                         │
+│                         │                                 │     Elasticsearch       │
+│ /json-logs/            │                                 │                         │
+│ /plain-logs/           │                                 └─────────────────────────┘
+│ /ndjson-logs/          │
+│ /csv-logs/             │
+└─────────────────────────┘
 ```
 
 ## Components
 
-- **Existing S3 Bucket**: Stores the logs that need to be processed
+- **S3 Bucket**: Automatically created to store logs with organized folder structure
 - **SQS Queue**: Receives notifications when new files are added to the S3 bucket
-- **Lambda Function**: Runs the Elastic Serverless Forwarder to collect logs from S3 via SQS and forward them to Elasticsearch
+- **Lambda Function**: Runs the Elastic Serverless Forwarder to process logs and forward to Elasticsearch
 - **IAM Roles and Policies**: Provides necessary permissions to access AWS resources
+
+## Supported Data Types
+
+This setup supports multiple log formats with organized storage:
+
+### 📁 **Folder Structure**
+- `/json-logs/` - JSON formatted application logs
+- `/plain-logs/` - Plain text logs (Apache/Nginx style)
+- `/ndjson-logs/` - Newline-delimited JSON logs
+- `/csv-logs/` - CSV formatted metrics and data
+
+### 📋 **Data Format Examples**
+
+**JSON Logs** (`/json-logs/`)
+```json
+{
+  "@timestamp": "2025-01-15T10:30:00Z",
+  "level": "INFO",
+  "message": "User authentication successful",
+  "user_id": "user123"
+}
+```
+
+**Plain Text Logs** (`/plain-logs/`)
+```
+192.168.1.100 - - [15/Jan/2025:10:30:00 +0000] "GET /api/users HTTP/1.1" 200 1234
+```
+
+**NDJSON Logs** (`/ndjson-logs/`)
+```
+{"@timestamp": "2025-01-15T10:30:00Z", "level": "INFO", "service": "api-gateway"}
+{"@timestamp": "2025-01-15T10:30:01Z", "level": "WARN", "service": "user-service"}
+```
+
+**CSV Logs** (`/csv-logs/`)
+```csv
+timestamp,level,service,message,user_id,response_time_ms
+2025-01-15 10:30:00,INFO,web-server,Request completed,user123,150
+```
 
 ## Prerequisites
 
@@ -39,54 +79,101 @@ This Terraform project sets up the necessary AWS infrastructure to collect logs 
 
 ## Usage
 
-1. Clone this repository
-2. Create a `terraform.tfvars` file based on the provided example
-3. Initialize Terraform:
-   ```
-   terraform init
-   ```
-4. Apply the Terraform configuration:
-   ```
-   terraform apply
-   ```
-5. After resources are created, you can run the test script:
-   ```
-   python test_s3_logging.py --region <aws-region> --s3-bucket <s3-bucket-name> --sqs-queue-url <sqs-queue-url>
-   ```
+### 1. Configure
 
-## Configuration
+Create a `terraform.tfvars` file:
 
-The key configurations needed in your `terraform.tfvars` file are:
+```hcl
+aws_region = "ap-northeast-1"
+aws_profile = "default"
+prefix = "myproject"
 
-- `elasticsearch_url`: The URL to your Elasticsearch deployment
-- `elasticsearch_api_key`: An API key with permissions to write to Elasticsearch
-- `esf_release_version`: The version of the Elastic Serverless Forwarder to use (default: "lambda-v1.9.0")
+s3_bucket_prefix = "my-logs-bucket"
+sqs_queue_name = "s3-notifications-queue"
 
-See the `terraform.tfvars.example` file for all available configuration options.
+elasticsearch_url = "https://your-elasticsearch-instance.example.com:9243"
+elasticsearch_api_key = "your_api_key"
+elasticsearch_datastream = "logs-aws.s3-default"
 
-## Testing
+default_tags = {
+  Environment = "production"
+  Project     = "log-collection"
+}
+```
 
-The included test script (`test_s3_logging.py`) generates random log files, uploads them to the S3 bucket, and verifies that SQS messages are generated. This helps confirm that the infrastructure is working correctly.
+### 2. Deploy
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+### 3. Test
+
+```bash
+pip install -r requirements.txt
+
+python test_s3_logging.py \
+  --region ap-northeast-1 \
+  --s3-bucket $(terraform output -raw logs_s3_bucket_name) \
+  --lambda-function $(terraform output -raw lambda_function_name) \
+  --elasticsearch-url "https://your-elasticsearch.com:9243" \
+  --elasticsearch-api-key "your-api-key"
+```
+
+**Expected Result**: The test will upload sample files to S3, wait for processing, and verify that data appears in Elasticsearch within 120 seconds.
+
+## Configuration Variables
+
+### Required
+| Variable | Description |
+|----------|-------------|
+| `prefix` | Prefix for all resource names |
+| `s3_bucket_prefix` | Prefix for S3 bucket name |
+| `elasticsearch_url` | Your Elasticsearch endpoint |
+| `elasticsearch_api_key` | API key for Elasticsearch |
+
+### Optional
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `aws_region` | `"ap-northeast-1"` | AWS region for deployment |
+| `aws_profile` | `"default"` | AWS profile to use |
+| `sqs_queue_name` | Required | Name for SQS notification queue |
+| `lambda_log_level` | `"INFO"` | Log level for Lambda function |
+| `elasticsearch_datastream` | `"logs-aws.s3-default"` | Target datastream name |
 
 ## AWS Permissions
 
-The following permissions are required for the Lambda function to access AWS resources:
-- `sqs:DeleteMessage`
-- `sqs:GetQueueAttributes`
-- `sqs:ReceiveMessage`
-- `sqs:ChangeMessageVisibility`
-- `s3:GetObject`
-- `s3:ListBucket`
-- `logs:CreateLogGroup`
-- `logs:CreateLogStream`
-- `logs:PutLogEvents`
+The Lambda function requires these permissions:
+- `s3:GetObject`, `s3:ListBucket`
+- `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes`, `sqs:ChangeMessageVisibility`
+- `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`
+
+## Troubleshooting
+
+### Common Issues
+
+**Permission Errors**
+```bash
+aws sts get-caller-identity  # Check AWS credentials
+export AWS_PROFILE=your-profile-name
+```
+
+**Lambda Function Errors**
+```bash
+aws logs filter-log-events --log-group-name "/aws/lambda/your-function-name"
+```
+
+**Elasticsearch Connection**
+```bash
+curl -H "Authorization: ApiKey your-api-key" "https://your-elasticsearch-url/_cluster/health"
+```
 
 ## Cleanup
 
-To destroy all created resources:
-
-```
+```bash
 terraform destroy
 ```
 
-Note: The ESF configuration S3 bucket is created with `force_destroy = true` to allow clean destruction even if it contains objects. The main logs bucket is not managed by this Terraform configuration.
+Both S3 buckets are created with `force_destroy = true` for easy cleanup.
